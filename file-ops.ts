@@ -281,15 +281,29 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
             if (templateL1Section.isPreHeaderContent) continue;
 
             debug(`\t\tProcessing L1 header: "${templateL1Section.header}"`);
-            // Find matching L1 header in target
+            // Find ALL matching L1 headers in target
             const matchingL1Sections = targetInMemory.filter(s => s.header === templateL1Section.header);
             
             if (matchingL1Sections.length > 0) {
                 debug(`\t\t\tFound ${matchingL1Sections.length} matching L1 section(s) in target`);
                 
+                // Combine content from all matching L1 sections
+                const combinedL1Content = matchingL1Sections
+                    .map(section => section.content.trim())
+                    .filter(content => content !== '')
+                    .join('\n');
+
+                // Combine all L2 subsections from all matching L1 sections
+                const combinedL2Sections: HeaderSection[] = [];
+                matchingL1Sections.forEach(section => {
+                    if (section.subSections) {
+                        combinedL2Sections.push(...section.subSections);
+                    }
+                });
+                
                 const stagingL1Section: HeaderSection = {
                     header: templateL1Section.header,
-                    content: matchingL1Sections[0].content || '',  // Keep any direct L1 content
+                    content: combinedL1Content,
                     position: stagingInMemory.length,
                     level: 1,
                     subSections: []  // Initialize empty array
@@ -301,10 +315,10 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                     for (const templateL2Section of templateL1Section.subSections) {
                         debug(`\t\t\t\tProcessing L2 header: "${templateL2Section.header}"`);
                         
-                        // Find ALL matching L2 headers in target's matching L1 section
-                        const matchingL2Sections = matchingL1Sections[0].subSections?.filter(
+                        // Find ALL matching L2 headers in combined L2 sections
+                        const matchingL2Sections = combinedL2Sections.filter(
                             s => s.header === templateL2Section.header
-                        ) || [];
+                        );
                         
                         if (matchingL2Sections.length > 0) {
                             debug(`\t\t\t\t\tFound ${matchingL2Sections.length} matching L2 section(s) in target`);
@@ -339,11 +353,11 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                     }
 
                     // Add remaining L2 headers from target that weren't in template
-                    const remainingL2Sections = matchingL1Sections[0].subSections?.filter(
+                    const remainingL2Sections = combinedL2Sections.filter(
                         targetL2 => !templateL1Section.subSections?.some(
                             templateL2 => templateL2.header === targetL2.header
                         )
-                    ) || [];
+                    );
 
                     if (remainingL2Sections.length > 0) {
                         debug(`\t\t\t\tAdding ${remainingL2Sections.length} remaining L2 headers from target`);
