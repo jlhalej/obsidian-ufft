@@ -301,20 +301,25 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                     for (const templateL2Section of templateL1Section.subSections) {
                         debug(`\t\t\t\tProcessing L2 header: "${templateL2Section.header}"`);
                         
-                        // Find matching L2 header in target's matching L1 section
+                        // Find ALL matching L2 headers in target's matching L1 section
                         const matchingL2Sections = matchingL1Sections[0].subSections?.filter(
                             s => s.header === templateL2Section.header
                         ) || [];
                         
                         if (matchingL2Sections.length > 0) {
-                            debug(`\t\t\t\t\tFound matching L2 section in target`);
-                            // Use content from target's L2
+                            debug(`\t\t\t\t\tFound ${matchingL2Sections.length} matching L2 section(s) in target`);
+                            // Combine content from all matching L2 sections
+                            const combinedContent = matchingL2Sections
+                                .map(section => section.content.trim())
+                                .filter(content => content !== '')
+                                .join('\n');
+                            
                             if (!stagingL1Section.subSections) {
                                 stagingL1Section.subSections = [];
                             }
                             stagingL1Section.subSections.push({
                                 header: templateL2Section.header,
-                                content: matchingL2Sections[0].content.trim(),
+                                content: combinedContent,
                                 position: stagingL1Section.subSections.length,
                                 level: 2
                             });
