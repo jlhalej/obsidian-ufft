@@ -108,14 +108,16 @@ You can install this plugin manually by following these steps:
 #### Option 1: Installing from release
 1. Go to the [Releases](https://github.com/jlhalej/obsidian-ufft/releases) page
 2. Download the latest release zip file
-3. Extract the zip file into your vault's `.obsidian/plugins/` directory
+3. Create a folder called `UFFT` (exactly this name) in your vault's `.obsidian/plugins/` directory
+4. Extract the contents of the zip file into this `UFFT` folder
    - The path should look like: `.obsidian/plugins/UFFT/`
-   - Make sure you have the following files in the UFFT directory:
+   - Make sure you have the following files directly in the UFFT directory:
      - `main.js`
      - `manifest.json`
      - `styles.css`
-4. Restart Obsidian
-5. Enable the plugin in Obsidian's Community Plugins settings
+   - Note: Do NOT keep the `obsidian-ufft-x.x.x` folder structure from the zip!
+5. Restart Obsidian
+6. Enable the plugin in Obsidian's Community Plugins settings
 
 #### Option 2: Building from source
 If you want to install the latest version from source:
