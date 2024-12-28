@@ -103,9 +103,63 @@ Note how:
 
 ### Manual Installation
 
-1. Download the latest release from the GitHub releases page
-2. Extract the files into your vault's `.obsidian/plugins/UFFT/` directory
-3. Enable the plugin in Obsidian's settings
+You can install this plugin manually by following these steps:
+
+#### Option 1: Installing from release
+1. Go to the [Releases](https://github.com/jlhalej/obsidian-ufft/releases) page
+2. Download the latest release zip file
+3. Extract the zip file into your vault's `.obsidian/plugins/` directory
+   - The path should look like: `.obsidian/plugins/UFFT/`
+   - Make sure you have the following files in the UFFT directory:
+     - `main.js`
+     - `manifest.json`
+     - `styles.css`
+4. Restart Obsidian
+5. Enable the plugin in Obsidian's Community Plugins settings
+
+#### Option 2: Building from source
+If you want to install the latest version from source:
+
+1. Download the repository as a ZIP file from GitHub
+   - Click the green "Code" button
+   - Select "Download ZIP"
+2. Extract the ZIP file to a temporary location
+3. Open a terminal/command prompt and navigate to the extracted directory
+4. Install dependencies:
+   ```bash
+   npm install
+   ```
+5. Build the plugin:
+   ```bash
+   npm run build
+   ```
+6. Copy the following files to your vault's `.obsidian/plugins/UFFT/` directory:
+   - `main.js`
+   - `manifest.json`
+   - `styles.css`
+7. Restart Obsidian
+8. Enable the plugin in Obsidian's Community Plugins settings
+
+Note: If you don't have Node.js installed (required for npm commands):
+1. Download and install Node.js from [nodejs.org](https://nodejs.org/)
+2. Restart your computer after installation
+3. Then proceed with the steps above
+
+#### Troubleshooting
+- If you get an error about missing dependencies, make sure you ran `npm install` in the correct directory
+- If the plugin doesn't appear in Obsidian, verify that you copied all required files to the correct location
+- Make sure you have restarted Obsidian after installing the plugin
+- Check that the plugin is enabled in Settings -> Community Plugins
+
+## For Developers
+
+If you want to contribute to the plugin or build it from source:
+
+1. Clone this repo
+2. Install dependencies with `npm install`
+3. Build the plugin with `npm run build`
+4. Copy over `main.js`, `manifest.json`, and `styles.css` to your vault's plugins folder
+5. Reload Obsidian to see the changes
 
 ## Development
 
