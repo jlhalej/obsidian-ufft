@@ -1,31 +1,141 @@
 import { TAbstractFile, TFolder, TFile, App, Notice } from 'obsidian';
 import { TextInputSuggest } from 'suggest';
 import UFFT from './main';
+import { parsePreHeaderContent, PreHeaderContent, FrontmatterTag, InlineProperty } from './pre-header-parser';
 
 let DEBUG = false;
 
 // Helper function to log debug messages
 function debug(...args: any[]) {
-    const plugin = (window as any).UFFT;
-    if (plugin?.DEBUG) {
-        console.log(...args);
-    }
+    console.log(...args);
 }
 
 // Add the interfaces needed for the settings
-interface TemplateFolderStruct {
+export interface TemplateFolderStruct {
+    path: string;
+    name: string;
+    children: TemplateFolderStruct[];
+    isFolder: boolean;
     Template: string;
     Folder: string;
     IncludeSubFolders: boolean;
 }
 
-interface HeaderSection {
+export interface HeaderSection {
     header: string;
     content: string;
     position: number;
     isPreHeaderContent?: boolean;
     level?: number;  // 1 for L1, 2 for L2, undefined for pre-header
     subSections?: HeaderSection[];  // For L2 headers under this L1
+    preHeaderContent?: PreHeaderContent;  // Structured pre-header content
+}
+
+/**
+ * Merges pre-header content from template and target files
+ * @param templatePreHeader Template pre-header content
+ * @param targetPreHeader Target pre-header content
+ * @returns Merged pre-header content
+ */
+function mergePreHeaderContent(templatePreHeader: PreHeaderContent | undefined, targetPreHeader: PreHeaderContent | undefined): PreHeaderContent {
+    const result: PreHeaderContent = {
+        frontmatter: [],
+        inlineProperties: [],
+        remainingText: ''
+    };
+
+    // If no template pre-header, use target if it exists
+    if (!templatePreHeader) {
+        return targetPreHeader || result;
+    }
+
+    // If no target pre-header, use template
+    if (!targetPreHeader) {
+        return templatePreHeader;
+    }
+
+    // Process frontmatter tags one by one from template
+    const processedTags = new Set<string>();
+    for (const templateTag of templatePreHeader.frontmatter) {
+        const matchingTags = targetPreHeader.frontmatter.filter(t => t.name === templateTag.name);
+        
+        // If tag exists in target, use target values
+        if (matchingTags.length > 0) {
+            matchingTags.forEach(tag => {
+                result.frontmatter.push({
+                    name: tag.name,
+                    value: tag.value,
+                    format: tag.format
+                });
+            });
+        } else {
+            // If tag doesn't exist in target, use template value
+            result.frontmatter.push({
+                name: templateTag.name,
+                value: templateTag.value,
+                format: templateTag.format
+            });
+        }
+        processedTags.add(templateTag.name);
+    }
+
+    // Add remaining frontmatter from target that wasn't in template
+    targetPreHeader.frontmatter
+        .filter(tag => !processedTags.has(tag.name))
+        .forEach(tag => {
+            result.frontmatter.push({
+                name: tag.name,
+                value: tag.value,
+                format: tag.format
+            });
+        });
+
+    // Process inline properties from template
+    const processedProps = new Set<string>();
+    for (const templateProp of templatePreHeader.inlineProperties) {
+        const matchingProps = targetPreHeader.inlineProperties.filter(p => p.name === templateProp.name);
+        
+        // If property exists in target, use target values
+        if (matchingProps.length > 0) {
+            matchingProps.forEach(prop => {
+                result.inlineProperties.push({
+                    name: prop.name,
+                    value: prop.value
+                });
+            });
+        } else {
+            // If property doesn't exist in target, use template value
+            result.inlineProperties.push({
+                name: templateProp.name,
+                value: templateProp.value
+            });
+        }
+        processedProps.add(templateProp.name);
+    }
+
+    // Add remaining inline properties from target that weren't in template
+    targetPreHeader.inlineProperties
+        .filter(prop => !processedProps.has(prop.name))
+        .forEach(prop => {
+            result.inlineProperties.push({
+                name: prop.name,
+                value: prop.value
+            });
+        });
+
+    // Merge remaining text - Use target text if it exists, otherwise use template text
+    const targetText = targetPreHeader.remainingText.trim();
+    const templateText = templatePreHeader.remainingText.trim();
+    
+    if (targetText) {
+        // If target has text, use it and ignore template text
+        result.remainingText = targetText;
+    } else {
+        // If target has no text, use template text
+        result.remainingText = templateText;
+    }
+
+    return result;
 }
 
 export class FolderSuggest extends TextInputSuggest<TFolder> {
@@ -146,14 +256,15 @@ function combineHeaderSections(sections: HeaderSection[]): HeaderSection {
 }
 
 export async function getHeaderSections(app: App, filePath: string): Promise<HeaderSection[]> {
-    debug(`\t\tReading sections from: ${filePath}`);
+    debug(`Reading sections from: ${filePath}`);
     const file = app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) {
-        debug(`\t\t\tFile not found: ${filePath}`);
+        debug(`File not found: ${filePath}`);
         return [];
     }
 
     const content = await app.vault.read(file);
+    debug(`File content:\n${content}`);
     const lines = content.split('\n');
     const sections: HeaderSection[] = [];
 
@@ -168,50 +279,62 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
     }
 
     if (preHeaderLines.length > 0) {
-        debug(`\t\t\tFound pre-header content`);
-        sections.unshift({
-            header: '',
-            content: preHeaderLines.join('\n').trim(),
-            position: 0,
-            isPreHeaderContent: true
-        });
+        debug(`Found pre-header content: ${preHeaderLines.length} lines`);
+        const preHeaderContent = preHeaderLines.join('\n').trim();
+        if (preHeaderContent) {
+            debug(`Pre-header content:\n${preHeaderContent}`);
+            const parsedPreHeader = parsePreHeaderContent(preHeaderContent);
+            debug(`Parsed pre-header:`, parsedPreHeader);
+            sections.push({
+                header: '',
+                content: preHeaderContent,
+                position: 0,
+                isPreHeaderContent: true,
+                preHeaderContent: parsedPreHeader
+            });
+        }
     }
 
     let currentL1Header = '';
-    let currentL2Header = '';
     let currentL1Content: string[] = [];
+    let currentL2Header = '';
     let currentL2Content: string[] = [];
     let currentL1Section: HeaderSection | null = null;
 
     const saveL2Section = () => {
-        if (currentL2Header && currentL1Section) {
-            if (!currentL1Section.subSections) {
-                currentL1Section.subSections = [];
-            }
+        if (currentL2Header && currentL1Section?.subSections) {
+            // Save L2 content if there is any
             currentL1Section.subSections.push({
                 header: currentL2Header,
                 content: currentL2Content.filter(l => l.trim() !== '').join('\n').trim(),
                 position: currentL1Section.subSections.length,
                 level: 2
             });
+            
+            // Reset L2-related variables
             currentL2Header = '';
             currentL2Content = [];
         }
     };
 
     const saveL1Section = () => {
-        if (currentL1Section) {
-            // Save any pending L2 section first
-            saveL2Section();
-            
-            // Save L1 content if there is any
-            if (currentL1Content.length > 0) {
-                currentL1Section.content = currentL1Content.filter(l => l.trim() !== '').join('\n').trim();
-            }
-            
-            sections.push(currentL1Section);
-            currentL1Content = [];
+        // Save any pending L2 section first
+        saveL2Section();
+        
+        // If we have a current L1 section and content
+        if (currentL1Section && currentL1Content.length > 0) {
+            currentL1Section.content = currentL1Content.filter(l => l.trim() !== '').join('\n').trim();
         }
+        
+        // Push current L1 section if it exists
+        if (currentL1Section) {
+            sections.push(currentL1Section);
+        }
+        
+        // Reset all L1-related variables
+        currentL1Header = '';
+        currentL1Content = [];
+        currentL1Section = null;
     };
 
     for (; i < lines.length; i++) {
@@ -223,26 +346,25 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
 
             // Start new L1 section
             currentL1Header = line.substring(2).trim();
+            saveL2Section();  // Save any pending L2 section
             currentL1Section = {
                 header: currentL1Header,
                 content: '',
-                position: i,
+                position: sections.length,
                 level: 1,
-                subSections: []
+                subSections: []  // Always initialize subSections array
             };
-
         } else if (line.startsWith('## ')) {  // L2 header
-            // Save previous L2 section if exists
+            // Save any previous L2 section
             saveL2Section();
 
             // Start new L2 section
             currentL2Header = line.substring(3).trim();
-
         } else {
-            // Add content to appropriate level
+            // Add content to appropriate section
             if (currentL2Header) {
                 currentL2Content.push(line);
-            } else if (currentL1Header) {
+            } else if (currentL1Section) {  
                 currentL1Content.push(line);
             }
         }
@@ -251,6 +373,7 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
     // Save final sections
     saveL1Section();
 
+    debug(`Parsed sections:`, sections);
     return sections;
 }
 
@@ -262,78 +385,131 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
     try {
         // Get sections from both files
         debug(`\tReading template file...`);
-        const templateInMemory = await getHeaderSections(app, templatePath);
+        const templateSections = await getHeaderSections(app, templatePath);
         debug(`\tReading target file...`);
-        let targetInMemory = await getHeaderSections(app, targetPath);
-        const stagingInMemory: HeaderSection[] = [];
+        let targetSections = await getHeaderSections(app, targetPath);
+        const stagingSections: HeaderSection[] = [];
 
         // Handle pre-header content first
-        const preHeaderContent = targetInMemory.find(s => s.isPreHeaderContent);
-        if (preHeaderContent) {
-            debug(`\t\tCopying pre-header content to staging`);
-            stagingInMemory.push(preHeaderContent);
-            targetInMemory = targetInMemory.filter(s => !s.isPreHeaderContent);
+        const templatePreHeader = templateSections.find(s => s.isPreHeaderContent)?.preHeaderContent;
+        const targetPreHeader = targetSections.find(s => s.isPreHeaderContent)?.preHeaderContent;
+
+        if (templatePreHeader || targetPreHeader) {
+            debug(`\t\tMerging pre-header content`);
+            const mergedPreHeader = mergePreHeaderContent(templatePreHeader, targetPreHeader);
+            debug(`\t\tMerged pre-header:`, mergedPreHeader);
+
+            // Convert merged pre-header back to text format
+            let preHeaderText = '';
+
+            // Add frontmatter if exists
+            if (mergedPreHeader.frontmatter.length > 0) {
+                preHeaderText += '---\n';
+                for (const tag of mergedPreHeader.frontmatter) {
+                    if (tag.format === 'list') {
+                        preHeaderText += `${tag.name}:\n`;
+                        const values = Array.isArray(tag.value) ? tag.value : [tag.value];
+                        for (const value of values) {
+                            preHeaderText += `- ${value}\n`;
+                        }
+                    } else if (tag.format === 'array') {
+                        const values = Array.isArray(tag.value) ? tag.value : [tag.value];
+                        preHeaderText += `${tag.name}: [${values.join(', ')}]\n`;
+                    } else {
+                        preHeaderText += `${tag.name}: ${tag.value}\n`;
+                    }
+                }
+                preHeaderText += '---\n';
+            }
+
+            // Add inline properties
+            for (const prop of mergedPreHeader.inlineProperties) {
+                preHeaderText += `${prop.name}:: ${prop.value}\n`;
+            }
+
+            // Add remaining text
+            if (mergedPreHeader.remainingText) {
+                preHeaderText += mergedPreHeader.remainingText + '\n';
+            }
+
+            stagingSections.push({
+                header: '',
+                content: preHeaderText.trim(),
+                position: 0,
+                isPreHeaderContent: true,
+                preHeaderContent: mergedPreHeader
+            });
         }
+
+        // Remove pre-header sections from both arrays
+        let templateInMemory = templateSections.filter(s => !s.isPreHeaderContent);
+        targetSections = targetSections.filter(s => !s.isPreHeaderContent);
 
         // Process L1 headers from template in order
         debug(`\tProcessing template headers in order...`);
         for (const templateL1Section of templateInMemory) {
-            if (templateL1Section.isPreHeaderContent) continue;
-
             debug(`\t\tProcessing L1 header: "${templateL1Section.header}"`);
             // Find ALL matching L1 headers in target
-            const matchingL1Sections = targetInMemory.filter(s => s.header === templateL1Section.header);
+            const matchingL1Sections = targetSections.filter(s => s.header === templateL1Section.header);
             
             if (matchingL1Sections.length > 0) {
                 debug(`\t\t\tFound ${matchingL1Sections.length} matching L1 section(s) in target`);
-                
-                // Combine content from all matching L1 sections
+                // Combine content from all matching L1 sections in target only
                 const combinedL1Content = matchingL1Sections
-                    .map(section => section.content.trim())
+                    .map(s => s.content.trim())
                     .filter(content => content !== '')
                     .join('\n');
 
-                // Combine all L2 subsections from all matching L1 sections
-                const combinedL2Sections: HeaderSection[] = [];
-                matchingL1Sections.forEach(section => {
-                    if (section.subSections) {
-                        combinedL2Sections.push(...section.subSections);
-                    }
-                });
-                
+                // If no content in target sections, use template content
+                const finalContent = combinedL1Content || templateL1Section.content.trim();
+
+                // Initialize stagingL1Section with subSections array
                 const stagingL1Section: HeaderSection = {
                     header: templateL1Section.header,
-                    content: combinedL1Content,
-                    position: stagingInMemory.length,
+                    content: finalContent,
+                    position: stagingSections.length,
                     level: 1,
-                    subSections: []  // Initialize empty array
+                    subSections: []
                 };
 
-                // Process L2 headers from template in order
+                // Process L2 headers from template
                 if (templateL1Section.subSections && templateL1Section.subSections.length > 0) {
-                    debug(`\t\t\tProcessing ${templateL1Section.subSections.length} L2 headers from template`);
+                    debug(`\t\t\t\tProcessing ${templateL1Section.subSections.length} L2 headers from template`);
+                    // Keep track of processed L2 headers and their parent L1s
+                    const processedL2Headers = new Map<string, Set<string>>();
+                    
                     for (const templateL2Section of templateL1Section.subSections) {
-                        debug(`\t\t\t\tProcessing L2 header: "${templateL2Section.header}"`);
+                        debug(`\t\t\t\t\tProcessing L2 header: "${templateL2Section.header}"`);
+                        // Track this L2 header under current L1
+                        if (!processedL2Headers.has(templateL1Section.header)) {
+                            processedL2Headers.set(templateL1Section.header, new Set());
+                        }
+                        processedL2Headers.get(templateL1Section.header)?.add(templateL2Section.header);
                         
-                        // Find ALL matching L2 headers in combined L2 sections
-                        const matchingL2Sections = combinedL2Sections.filter(
-                            s => s.header === templateL2Section.header
-                        );
+                        // Find matching L2 header in target
+                        const matchingL2Sections = matchingL1Sections
+                            .filter(s => s.subSections)
+                            .flatMap(s => s.subSections || [])
+                            .filter(s => s.header === templateL2Section.header);
                         
                         if (matchingL2Sections.length > 0) {
                             debug(`\t\t\t\t\tFound ${matchingL2Sections.length} matching L2 section(s) in target`);
-                            // Combine content from all matching L2 sections
+                            // Combine content from all matching L2 sections in target only
                             const combinedContent = matchingL2Sections
-                                .map(section => section.content.trim())
+                                .map(s => s.content.trim())
                                 .filter(content => content !== '')
                                 .join('\n');
+
+                            // If no content in target sections, use template content
+                            const finalContent = combinedContent || templateL2Section.content.trim();
                             
                             if (!stagingL1Section.subSections) {
                                 stagingL1Section.subSections = [];
                             }
+                            
                             stagingL1Section.subSections.push({
                                 header: templateL2Section.header,
-                                content: combinedContent,
+                                content: finalContent,
                                 position: stagingL1Section.subSections.length,
                                 level: 2
                             });
@@ -343,6 +519,7 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                             if (!stagingL1Section.subSections) {
                                 stagingL1Section.subSections = [];
                             }
+                            
                             stagingL1Section.subSections.push({
                                 header: templateL2Section.header,
                                 content: templateL2Section.content.trim(),
@@ -351,90 +528,108 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                             });
                         }
                     }
-
+                    
                     // Add remaining L2 headers from target that weren't in template
-                    const remainingL2Sections = combinedL2Sections.filter(
-                        targetL2 => !templateL1Section.subSections?.some(
-                            templateL2 => templateL2.header === targetL2.header
-                        )
-                    );
-
-                    if (remainingL2Sections.length > 0) {
-                        debug(`\t\t\t\tAdding ${remainingL2Sections.length} remaining L2 headers from target`);
-                        for (const remainingL2 of remainingL2Sections) {
-                            if (!stagingL1Section.subSections) {
-                                stagingL1Section.subSections = [];
+                    for (const l1Section of matchingL1Sections) {
+                        if (!l1Section.subSections) continue;
+                        
+                        const l1Header = l1Section.header;
+                        const processedHeaders = processedL2Headers.get(l1Header) || new Set();
+                        
+                        const remainingL2Sections = l1Section.subSections
+                            .filter(s => !processedHeaders.has(s.header));
+                        
+                        if (remainingL2Sections.length > 0) {
+                            debug(`\t\t\t\tAdding ${remainingL2Sections.length} remaining L2 headers from target under L1: "${l1Header}"`);
+                            for (const l2Section of remainingL2Sections) {
+                                if (!stagingL1Section.subSections) {
+                                    stagingL1Section.subSections = [];
+                                }
+                                
+                                stagingL1Section.subSections.push({
+                                    header: l2Section.header,
+                                    content: l2Section.content.trim(),
+                                    position: stagingL1Section.subSections.length,
+                                    level: 2
+                                });
                             }
-                            stagingL1Section.subSections.push({
-                                header: remainingL2.header,
-                                content: remainingL2.content.trim(),
-                                position: stagingL1Section.subSections.length,
-                                level: 2
-                            });
                         }
                     }
                 }
                 
-                stagingInMemory.push(stagingL1Section);
+                stagingSections.push(stagingL1Section);
                 
-                // Remove processed L1 section from targetInMemory
-                targetInMemory = targetInMemory.filter(s => s.header !== templateL1Section.header);
+                // Remove processed L1 section from targetSections
+                targetSections = targetSections.filter(s => s.header !== templateL1Section.header);
                 
             } else {
                 debug(`\t\t\tNo matching L1 section found, using template content`);
-                // No matching L1 header, use template content including all L2 headers
+                // Use content from template's L1
                 const stagingL1Section: HeaderSection = {
                     header: templateL1Section.header,
                     content: templateL1Section.content.trim(),
-                    position: stagingInMemory.length,
+                    position: stagingSections.length,
                     level: 1,
-                    subSections: []  // Initialize empty array
+                    subSections: []
                 };
 
                 // Copy L2 sections from template
                 if (templateL1Section.subSections && templateL1Section.subSections.length > 0) {
-                    stagingL1Section.subSections = templateL1Section.subSections.map(s => ({
-                        header: s.header,
-                        content: s.content.trim(),
-                        position: stagingL1Section.subSections?.length || 0,
-                        level: 2
-                    }));
+                    templateL1Section.subSections.forEach(s => {
+                        if (!stagingL1Section.subSections) {
+                            stagingL1Section.subSections = [];
+                        }
+                        
+                        stagingL1Section.subSections.push({
+                            header: s.header,
+                            content: s.content.trim(),
+                            position: stagingL1Section.subSections.length,
+                            level: 2
+                        });
+                    });
                 }
 
-                stagingInMemory.push(stagingL1Section);
+                stagingSections.push(stagingL1Section);
             }
         }
 
         // Add remaining L1 headers from target that weren't in template
-        if (targetInMemory.length > 0) {
-            debug(`\tAdding ${targetInMemory.length} remaining L1 headers from target`);
-            targetInMemory.forEach(section => {
+        if (targetSections.length > 0) {
+            debug(`\tAdding ${targetSections.length} remaining L1 headers from target`);
+            targetSections.forEach(section => {
                 debug(`\t\tAdding remaining L1 header: "${section.header}"`);
+                // Initialize stagingL1Section with subSections array
                 const stagingL1Section: HeaderSection = {
                     header: section.header,
                     content: section.content.trim(),
-                    position: stagingInMemory.length,
+                    position: stagingSections.length,
                     level: 1,
-                    subSections: []  // Initialize empty array
+                    subSections: []
                 };
 
-                // Copy L2 sections if they exist
+                // Add any L2 headers from the target section
                 if (section.subSections && section.subSections.length > 0) {
-                    stagingL1Section.subSections = section.subSections.map(s => ({
-                        header: s.header,
-                        content: s.content.trim(),
-                        position: stagingL1Section.subSections?.length || 0,
-                        level: 2
-                    }));
+                    section.subSections.forEach(l2 => {
+                        if (!stagingL1Section.subSections) {
+                            stagingL1Section.subSections = [];
+                        }
+                        
+                        stagingL1Section.subSections.push({
+                            header: l2.header,
+                            content: l2.content.trim(),
+                            position: stagingL1Section.subSections.length,
+                            level: 2
+                        });
+                    });
                 }
 
-                stagingInMemory.push(stagingL1Section);
+                stagingSections.push(stagingL1Section);
             });
         }
 
         // Convert staging to final content
         debug(`\tGenerating final content...`);
-        const finalContent = stagingInMemory
+        const finalContent = stagingSections
             .map(section => {
                 if (section.isPreHeaderContent) {
                     return section.content.trim();
@@ -452,43 +647,39 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                 
                 // Add L2 sections if they exist
                 if (section.subSections && section.subSections.length > 0) {
-                    const l2Content = section.subSections
-                        .map(subSection => {
-                            if (subSection.content && subSection.content.trim()) {
-                                return `## ${subSection.header}\n${subSection.content.trim()}`;
-                            }
-                            return `## ${subSection.header}`;
-                        })
-                        .join('\n');
-                    parts.push(l2Content);
+                    for (const l2Section of section.subSections) {
+                        parts.push(`\n## ${l2Section.header}`);
+                        if (l2Section.content && l2Section.content.trim()) {
+                            parts.push(l2Section.content.trim());
+                        }
+                    }
                 }
                 
                 return parts.join('\n');
             })
-            .filter(content => content.trim() !== '')
-            .join('\n');
+            .join('\n\n');
 
-        // Write back to file
-        debug(`\tWriting to target file...`);
+        // Write final content to target file
+        debug(`\tWriting final content to target file...`);
         const targetFile = app.vault.getAbstractFileByPath(targetPath);
         if (!(targetFile instanceof TFile)) {
             throw new Error(`Target file not found: ${targetPath}`);
         }
-        
+
         const currentContent = await app.vault.read(targetFile);
         if (currentContent !== finalContent) {
             await app.vault.modify(targetFile, finalContent);
             new Notice(`Updated ${targetPath} from ${templatePath}`);
             debug(`\t✓ Successfully updated file`);
         } else {
-            new Notice(`Skipped ${targetPath} from ${templatePath}`);
-            debug(`\t- No changes needed`);
+            new Notice(`No changes needed for ${targetPath}`);
+            debug(`\t- File content unchanged`);
         }
-        
-        debug(`=== Finished updateFileWithTemplate ===\n`);
 
+        debug(`=== Finished updateFileWithTemplate ===\n`);
     } catch (error) {
-        console.error(`\t✗ Error in updateFileWithTemplate:`, error);
+        console.error('Error in updateFileWithTemplate:', error);
+        new Notice(`Error updating file: ${error.message}`);
         throw error;
     }
 }
