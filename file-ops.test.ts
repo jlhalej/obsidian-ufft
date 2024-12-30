@@ -331,3 +331,124 @@ Template content`;
         );
     });
 });
+
+describe('REQ1020: Frontmatter Tag Preservation', () => {
+    // Mock the necessary functions and setup
+    const mockGetAbstractFileByPath = jest.fn();
+    const mockRead = jest.fn();
+    const mockModify = jest.fn();
+
+    const mockApp = {
+        vault: {
+            getAbstractFileByPath: mockGetAbstractFileByPath,
+            read: mockRead,
+            modify: mockModify,
+        }
+    } as unknown as App;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        // Set up default mock behavior
+        mockGetAbstractFileByPath.mockImplementation((path: string) => {
+            return new MockTFile(path === 'template.md' ? templateContent : targetContent);
+        });
+        mockRead.mockImplementation((file: TFile) => {
+            return Promise.resolve(file instanceof MockTFile ? file.content : '');
+        });
+        mockModify.mockResolvedValue(undefined);
+    });
+
+    const templateContent = `---
+Manufacturer: pending
+Class: .
+Type:
+status: template
+tags: [template, test, base-template]
+metadata:
+  version: 1.0
+  author: template-creator
+  category: test-templates
+empty_tag1:
+empty_tag2:
+priority: high
+last_modified: 2024-12-29T15:51:30-05:00
+---
+InlineTag1BeforeHeader::  Value of InlineTag1BeforeHeader from Template`;
+
+    const targetContent = `---
+CustomManufacturer: This is the Custom Manufacturer
+estado: Jalisco
+status: draft
+tags: [note, custom, target-specific]
+metadata:
+  version: 2.0
+  author: note-creator
+  category: test-notes
+empty_tag1: 
+empty_tag3:
+priority: low
+last_modified: 2024-12-29T15:51:30-05:00
+custom_nested:
+  field1: value1
+  field2:
+  field3: value3
+---
+CustomInlineTag:: Value of the customInlineTag`;
+
+    test('REQ1020.1: preserve-all-tags', async () => {
+        // Act
+        await updateFileWithTemplate(mockApp, 'template.md', 'target.md');
+
+        // Assert
+        const modifyCallArg = mockModify.mock.calls[0][1];
+        const expectedTags = [
+            'Manufacturer', 'Class', 'Type', 'status', 'tags', 'metadata',
+            'empty_tag1', 'empty_tag2', 'priority', 'last_modified',
+            'CustomManufacturer', 'estado', 'empty_tag3', 'custom_nested'
+        ];
+
+        expectedTags.forEach(tag => {
+            expect(modifyCallArg).toContain(tag);
+        });
+    });
+
+    test('REQ1020.2: preserve-nested-structures', async () => {
+        // Act
+        await updateFileWithTemplate(mockApp, 'template.md', 'target.md');
+
+        // Assert
+        const modifyCallArg = mockModify.mock.calls[0][1];
+        expect(modifyCallArg).toContain('metadata:');
+        expect(modifyCallArg).toContain('version: 2.0'); // Target version should be preserved
+        expect(modifyCallArg).toContain('author: note-creator'); // Target author should be preserved
+        expect(modifyCallArg).toContain('category: test-notes'); // Target category should be preserved
+        expect(modifyCallArg).toContain('custom_nested:');
+        expect(modifyCallArg).toContain('field1: value1');
+        expect(modifyCallArg).toContain('field2:');
+        expect(modifyCallArg).toContain('field3: value3');
+    });
+
+    test('REQ1020.3: preserve-array-tags', async () => {
+        // Act
+        await updateFileWithTemplate(mockApp, 'template.md', 'target.md');
+
+        // Assert
+        const modifyCallArg = mockModify.mock.calls[0][1];
+        const expectedArrayValues = ['note', 'custom', 'target-specific'];
+        expectedArrayValues.forEach(value => {
+            expect(modifyCallArg).toContain(value);
+        });
+    });
+
+    test('REQ1020.4: preserve-empty-tags', async () => {
+        // Act
+        await updateFileWithTemplate(mockApp, 'template.md', 'target.md');
+
+        // Assert
+        const modifyCallArg = mockModify.mock.calls[0][1];
+        expect(modifyCallArg).toMatch(/empty_tag1:\s/);
+        expect(modifyCallArg).toMatch(/empty_tag2:\s/);
+        expect(modifyCallArg).toMatch(/empty_tag3:\s/);
+        expect(modifyCallArg).toMatch(/field2:\s/);
+    });
+});

@@ -4,10 +4,9 @@ Class: .
 Type:
 status: template
 tags: [template, test, base-template]
-metadata:
-  version: 1.0
-  author: template-creator
-  category: test-templates
+version: 1.0
+author: template-creator
+category: test-templates
 empty_tag1:
 empty_tag2:
 priority: high

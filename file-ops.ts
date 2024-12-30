@@ -54,86 +54,67 @@ function mergePreHeaderContent(templatePreHeader: PreHeaderContent | undefined, 
         return templatePreHeader;
     }
 
-    // Process frontmatter tags one by one from template
-    const processedTags = new Set<string>();
-    for (const templateTag of templatePreHeader.frontmatter) {
-        const matchingTags = targetPreHeader.frontmatter.filter(t => t.name === templateTag.name);
-        
-        // If tag exists in target, use target values
-        if (matchingTags.length > 0) {
-            matchingTags.forEach(tag => {
-                result.frontmatter.push({
-                    name: tag.name,
-                    value: tag.value,
-                    format: tag.format
-                });
-            });
+    // Create a map of all tags from both sources
+    const allTags = new Map<string, FrontmatterTag>();
+
+    // First add template tags
+    templatePreHeader.frontmatter.forEach(tag => {
+        allTags.set(tag.name, { ...tag });
+    });
+
+    // Then add/override with target tags
+    targetPreHeader.frontmatter.forEach(tag => {
+        if (!allTags.has(tag.name)) {
+            // If tag doesn't exist in template, add it
+            allTags.set(tag.name, { ...tag });
         } else {
-            // If tag doesn't exist in target, use template value
-            result.frontmatter.push({
-                name: templateTag.name,
-                value: templateTag.value,
-                format: templateTag.format
-            });
+            // If tag exists in template, use target's value and format
+            const existingTag = allTags.get(tag.name)!;
+            existingTag.value = tag.value;
+            existingTag.format = tag.format;
         }
-        processedTags.add(templateTag.name);
-    }
+    });
 
-    // Add remaining frontmatter from target that wasn't in template
-    targetPreHeader.frontmatter
-        .filter(tag => !processedTags.has(tag.name))
-        .forEach(tag => {
-            result.frontmatter.push({
-                name: tag.name,
-                value: tag.value,
-                format: tag.format
-            });
-        });
-
-    // Process inline properties from template
-    const processedProps = new Set<string>();
-    for (const templateProp of templatePreHeader.inlineProperties) {
-        const matchingProps = targetPreHeader.inlineProperties.filter(p => p.name === templateProp.name);
-        
-        // If property exists in target, use target values
-        if (matchingProps.length > 0) {
-            matchingProps.forEach(prop => {
-                result.inlineProperties.push({
-                    name: prop.name,
-                    value: prop.value
-                });
-            });
-        } else {
-            // If property doesn't exist in target, use template value
-            result.inlineProperties.push({
-                name: templateProp.name,
-                value: templateProp.value
-            });
-        }
-        processedProps.add(templateProp.name);
-    }
-
-    // Add remaining inline properties from target that weren't in template
-    targetPreHeader.inlineProperties
-        .filter(prop => !processedProps.has(prop.name))
-        .forEach(prop => {
-            result.inlineProperties.push({
-                name: prop.name,
-                value: prop.value
-            });
-        });
-
-    // Merge remaining text - Use target text if it exists, otherwise use template text
-    const targetText = targetPreHeader.remainingText.trim();
-    const templateText = templatePreHeader.remainingText.trim();
+    // Convert map back to array while preserving order
+    const templateOrder = new Set(templatePreHeader.frontmatter.map(t => t.name));
+    const targetOrder = new Set(targetPreHeader.frontmatter.map(t => t.name));
     
-    if (targetText) {
-        // If target has text, use it and ignore template text
-        result.remainingText = targetText;
-    } else {
-        // If target has no text, use template text
-        result.remainingText = templateText;
-    }
+    // Add template tags first
+    templateOrder.forEach(name => {
+        const tag = allTags.get(name);
+        if (tag) {
+            result.frontmatter.push(tag);
+            allTags.delete(name);
+        }
+    });
+
+    // Then add remaining target tags
+    targetOrder.forEach(name => {
+        const tag = allTags.get(name);
+        if (tag) {
+            result.frontmatter.push(tag);
+            allTags.delete(name);
+        }
+    });
+
+    // Process inline properties similarly
+    const allProps = new Map<string, InlineProperty>();
+
+    // First add template properties
+    templatePreHeader.inlineProperties.forEach(prop => {
+        allProps.set(prop.name, { ...prop });
+    });
+
+    // Then add/override with target properties
+    targetPreHeader.inlineProperties.forEach(prop => {
+        allProps.set(prop.name, { ...prop });
+    });
+
+    // Convert map back to array while preserving order
+    result.inlineProperties = Array.from(allProps.values());
+
+    // Use target's remaining text if it exists, otherwise use template's
+    result.remainingText = targetPreHeader.remainingText.trim() || templatePreHeader.remainingText.trim();
 
     return result;
 }

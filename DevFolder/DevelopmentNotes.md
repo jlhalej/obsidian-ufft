@@ -6,14 +6,13 @@ This file contains development notes and is kept locally but not pushed to GitHu
 
 ### 1.1.1. Pre-Header Handling
 
-| ReqNo | Status         | Desc                                               |
-| ----- | -------------- | -------------------------------------------------- |
-| 1000  | master 87d74e8 | Target content has priority over template content |
-| 1010  | master 87d74e8 | Target content has priority over template content |
-| 1020  | master 87d74e8 | All frontmatter tags must be preserved from both files |
-| 1030  | master 87d74e8 | All inline properties must be preserved from both files |
-| 1040  | master 87d74e8 | Remaining text from target is used if it exists, otherwise template text is used |
-| 1050  | partially implemented | Final pre-header should follow template's ordering where possible |
+| ReqNo | Status         | Desc                                                | Jest test name |
+| ----- | -------------- | --------------------------------------------------- | -------------- |
+| 1010  | master 87d74e8 | Target content has priority over template content   | |
+| 1020  | master 87d74e8 | All frontmatter tags must be preserved from both files | `REQ1020`<br>Subtests:<br>- `REQ1020.1: preserve-all-tags`<br>- `REQ1020.2: preserve-nested-structures`<br>- `REQ1020.3: preserve-array-tags`<br>- `REQ1020.4: preserve-empty-tags` |
+| 1030  | master 87d74e8 | All inline properties must be preserved from both files | |
+| 1040  | master 87d74e8 | Remaining text from target is used if it exists, otherwise template text is used | |
+| 1050  | partially implemented | Final pre-header should follow template's ordering where possible | |
 
 ### 1.1.2. L1 Headers Processing
 
@@ -248,32 +247,71 @@ function updateFileWithTemplate(app, templatePath, targetPath):
 
 ## 4.1. Sintaxis information about Frontmatter tags
 
-### 4.1.1. Frontmatter Tags: 
-Frontmatter tags can be in the following format:
-1. Single line, comma-separated:
-      
-      tags: tag1, tag2, tag3
-      
-2. List format:
-    
-    tags: 
-    - tag1
-    - tag2 
-    - tag3
-    
-3. Array format:
-    
-    tags: [tag1, tag2, tag3]
-    
+### 4.1.1. Frontmatter in Obsidian: 
 
-Frontmatter tags will always be between a pair of `---` characters.
+Obsidian supports YAML frontmatter, which allows you to add metadata to your notes. Here's a description of valid frontmatter in Obsidian and its syntax:
 
-Example:
+#### 4.1.1.1 Standard Frontmatter Structure
+
+Frontmatter in Obsidian must be placed at the very top of the note and enclosed within three dashes (---) on both sides. The basic structure looks like this:
+
+```yaml
 ---
-tags: tag1, tag2, tag3
-tags2: 
-    - tag_a
-    - tag_b
-    - tag_c
-tags: [tag1, tag2, tag3]
+key1: value1
+key2: value2
 ---
+```
+
+#### 4.1.1.2 Commonly Used Frontmatter Tags
+
+1. **tags**: Used to add tags to your note
+   ```yaml
+   tags:
+     - tag1
+     - tag2
+     - tag3/subtag
+   ```
+   Alternatively: `tags: [tag1, tag2, tag3/subtag]`
+
+2. **aliases**: Used to create alternative names for your note
+   ```yaml
+   aliases:
+     - Alias1
+     - Alias2
+   ```
+
+3. **cssclass**: Used to apply custom CSS classes to the note
+   ```yaml
+   cssclass: custom-class
+   ```
+
+4. **publish**: Used to control whether a note should be published (for Obsidian Publish)
+   ```yaml
+   publish: true
+   ```
+
+#### 4.1.2.3 Additional Frontmatter Options
+
+5. **date**: Often used to specify the creation or last modified date of the note
+   ```yaml
+   date: 2024-12-29
+   ```
+
+6. **title**: Can be used to specify a custom title for the note
+   ```yaml
+   title: "My Custom Note Title"
+   ```
+
+7. **author**: Used to specify the author of the note
+   ```yaml
+   author: John Doe
+   ```
+
+#### 4.1.1.4 Syntax Rules
+
+1. Use lowercase for keys (e.g., `tags`, not `Tags`).
+2. For single values, use `key: value` format.
+3. For multiple values, use either a list format with hyphens or an array format with square brackets.
+4. String values containing special characters should be enclosed in quotes.
+5. Do not use the hash symbol (#) for tags in frontmatter; it's not valid in YAML syntax.
+6. Indentation is important for nested structures.

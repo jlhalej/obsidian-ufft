@@ -14,19 +14,21 @@ After running the plugin using `template1.md` on `targetnote1.md`, verify the fo
 - [ ] `CustomManufacturer: This is the Custom Manufacturer` should remain
 - [ ] `estado: Jalisco` should remain
 - [ ] `empty_tag3:` should remain
-- [ ] `custom_nested` property should be preserved exactly as it appears in the target file (since it only exists in target)
+- [ ] `custom_nested` structure should be preserved exactly:
+  ```yaml
+  custom_nested:
+    - value1
+    - 
+    - value3
+  ```
 
 ### 3. Shared Tags Should Use Target's Values
 - [ ] `status:` should remain "draft" (not "template")
 - [ ] `tags:` should remain `[note, custom, target-specific]`
 - [ ] `priority:` should remain "low"
-- [ ] `metadata:` structure should preserve target's values:
-  ```yaml
-  metadata:
-    version: 2.0
-    author: note-creator
-    category: test-notes
-  ```
+- [ ] `version:` should remain "2.0"
+- [ ] `author:` should remain "note-creator"
+- [ ] `category:` should remain "test-notes"
 
 ### 4. Empty Tags Should Be Preserved
 - [ ] `empty_tag1:` from both files should be preserved

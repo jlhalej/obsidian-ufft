@@ -29,54 +29,45 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
     debug('Parsing frontmatter:', content);
     const tags: FrontmatterTag[] = [];
     const lines = content.split('\n');
+    let currentIndent = 0;
+    let currentParent: FrontmatterTag | null = null;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || line === '---') continue;
 
         debug('Processing line:', line);
-        // Check for key-value format
+        
+        // Calculate indentation level
+        const indent = lines[i].search(/\S/);
         const [name, ...valueParts] = line.split(':').map(part => part.trim());
         const valueStr = valueParts.join(':').trim();
 
-        // Skip if no valid key-value pair
-        if (!name || !valueStr) {
-            debug('Found potential list header:', name);
-            // Handle list format with dashes on next lines
-            const listItems: string[] = [];
-            while (i + 1 < lines.length && lines[i + 1].trim().startsWith('-')) {
-                i++;
-                const item = lines[i].trim().slice(1).trim();
-                debug('Found list item:', item);
-                if (item) listItems.push(item);
-            }
-            if (listItems.length > 0) {
-                debug('Adding list format tag:', { name, items: listItems });
-                tags.push({
-                    name,
-                    value: listItems,
-                    format: 'list'
-                });
-            }
+        // Create tag object
+        const tag: FrontmatterTag = {
+            name,
+            value: [],
+            format: 'single'
+        };
+
+        // Handle empty tags
+        if (!valueStr) {
+            tag.value = [''];
+            tags.push(tag);
             continue;
         }
 
         // Handle array format [tag1, tag2, tag3]
         if (valueStr.startsWith('[') && valueStr.endsWith(']')) {
-            tags.push({
-                name,
-                value: valueStr.slice(1, -1).split(',').map(tag => tag.trim()),
-                format: 'array'
-            });
+            tag.value = valueStr.slice(1, -1).split(',').map(t => t.trim());
+            tag.format = 'array';
+            tags.push(tag);
             continue;
         }
 
-        // Handle single line, comma-separated format
-        tags.push({
-            name,
-            value: valueStr.split(',').map(tag => tag.trim()),
-            format: 'single'
-        });
+        // Handle single value
+        tag.value = [valueStr];
+        tags.push(tag);
     }
 
     return tags;
