@@ -29,8 +29,7 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
     debug('Parsing frontmatter:', content);
     const tags: FrontmatterTag[] = [];
     const lines = content.split('\n');
-    let currentIndent = 0;
-    let currentParent: FrontmatterTag | null = null;
+    let currentArrayTag: FrontmatterTag | null = null;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -40,8 +39,39 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
         
         // Calculate indentation level
         const indent = lines[i].search(/\S/);
-        const [name, ...valueParts] = line.split(':').map(part => part.trim());
-        const valueStr = valueParts.join(':').trim();
+
+        // If we're currently processing an array and this line is indented
+        if (currentArrayTag && indent > 0) {
+            // Handle array item (remove leading dash and any trailing colon)
+            if (line.startsWith('-')) {
+                let value = line.slice(1).trim();
+                if (value === '') {
+                    // Empty array item
+                    if (Array.isArray(currentArrayTag.value)) {
+                        currentArrayTag.value.push('');
+                    }
+                } else {
+                    // Non-empty array item
+                    value = value.replace(/:$/, '').trim();
+                    if (Array.isArray(currentArrayTag.value)) {
+                        currentArrayTag.value.push(value);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Reset currentArrayTag if we're back to root level
+        if (indent === 0) {
+            currentArrayTag = null;
+        }
+
+        // Handle normal key-value pairs
+        const colonIndex = line.indexOf(':');
+        if (colonIndex === -1) continue;
+
+        const name = line.slice(0, colonIndex).trim();
+        let value = line.slice(colonIndex + 1).trim();
 
         // Create tag object
         const tag: FrontmatterTag = {
@@ -51,22 +81,33 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
         };
 
         // Handle empty tags
-        if (!valueStr) {
-            tag.value = [''];
+        if (!value) {
+            tag.format = 'list';
+            tag.value = [];
+            currentArrayTag = tag;
             tags.push(tag);
             continue;
         }
 
         // Handle array format [tag1, tag2, tag3]
-        if (valueStr.startsWith('[') && valueStr.endsWith(']')) {
-            tag.value = valueStr.slice(1, -1).split(',').map(t => t.trim());
+        if (value.startsWith('[') && value.endsWith(']')) {
+            tag.value = value.slice(1, -1).split(',').map(t => t.trim());
             tag.format = 'array';
             tags.push(tag);
             continue;
         }
 
+        // Handle multi-line array
+        if (value === '') {
+            tag.format = 'list';
+            tag.value = [];
+            currentArrayTag = tag;
+            tags.push(tag);
+            continue;
+        }
+
         // Handle single value
-        tag.value = [valueStr];
+        tag.value = [value];
         tags.push(tag);
     }
 

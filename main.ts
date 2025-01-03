@@ -1,11 +1,6 @@
 import { App, ButtonComponent, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
-import { FileSuggest, FolderSuggest, getFilesInFolder, getLevel1Headers, updateFileWithTemplate, RunUpdate, RunAllRules } from './file-ops';
+import { FileSuggest, FolderSuggest, getFilesInFolder, getLevel1Headers, updateFileWithTemplate, RunUpdate, RunAllRules, TemplateFolderStruct } from './file-ops';
 
-interface TemplateFolderStruct {
-	Template: string;
-	Folder: string;
-	IncludeSubFolders: boolean;
-}
 interface MyPluginSettings {
 	TemplateFolderArray: Array<TemplateFolderStruct>;
 }
@@ -24,12 +19,14 @@ export default class UFFT extends Plugin {
 		console.log('UFFT is loaded! ' + LastVersionUpdate);
 
 		// Expose the plugin to the window object for debugging
-		(window as any).UFFT = this;
+		if (this.DEBUG) {
+			(window as any).UFFT = this;
+		}
 
 		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('list-start', `UFFT - Update Files From Template`, (evt: MouseEvent) => {
+		const ribbonIconEl = this.addRibbonIcon('list-start', `UFFT - Update Files From Template`, async (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
-			RunAllRules(this.app, this.settings.TemplateFolderArray);
+			await RunAllRules(this.app, this.settings.TemplateFolderArray);
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('my-plugin-ribbon-class');
@@ -37,8 +34,8 @@ export default class UFFT extends Plugin {
 		this.addCommand({
 			id: 'ufft-update-files-from-template',
 			name: 'Update Files From Template',
-			callback: () => {
-				RunAllRules(this.app, this.settings.TemplateFolderArray);
+			callback: async () => {
+				await RunAllRules(this.app, this.settings.TemplateFolderArray);
 			},
 		});
 
@@ -89,7 +86,6 @@ class UFFTSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const {containerEl} = this;
-		containerEl.empty(); 
 		this.containerEl.empty();
 		this.add_ufft_setting();
 	}

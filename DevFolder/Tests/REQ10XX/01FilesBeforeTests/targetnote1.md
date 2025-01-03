@@ -6,17 +6,25 @@ tags: [note, custom, target-specific]
 version: 2.0
 author: note-creator
 category: test-notes
+BracketTagAlreadyInTarget: [BracketTagAlreadyInTarget, BracketTag2, BracketTag3]
+
 empty_tag1: 
 empty_tag3:
 priority: low
 last_modified: 2024-12-29T15:59:35-05:00
-custom_nested:
-  - value1
-  - 
-  - value3
+customNestedAlreadyInTarget:
+  - valueAlreadyInTarget1
+  - valueAlreadyInTarget2
+  - valueAlreadyInTarget3
+
+custom_nested_Shared:
+  - ValueFromTargetShouldBePreserved1
+  - ValueFromTargetShouldBePreserved2
 ---
 CustomInlineTag:: Value of the customInlineTag
 SharedInlineTag:: Value from Target (should be preserved)
+InlineTagOnlyInTarget:: InlineTagOnlyInTargetValue should be preserved
+
 
 # Header 1 from Target
 This is the content under header 1 from the target file.

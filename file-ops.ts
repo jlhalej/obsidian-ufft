@@ -1,6 +1,5 @@
 import { TAbstractFile, TFolder, TFile, App, Notice } from 'obsidian';
 import { TextInputSuggest } from 'suggest';
-import UFFT from './main';
 import { parsePreHeaderContent, PreHeaderContent, FrontmatterTag, InlineProperty } from './pre-header-parser';
 
 let DEBUG = false;
@@ -12,10 +11,6 @@ function debug(...args: any[]) {
 
 // Add the interfaces needed for the settings
 export interface TemplateFolderStruct {
-    path: string;
-    name: string;
-    children: TemplateFolderStruct[];
-    isFolder: boolean;
     Template: string;
     Folder: string;
     IncludeSubFolders: boolean;
@@ -390,14 +385,25 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                     if (tag.format === 'list') {
                         preHeaderText += `${tag.name}:\n`;
                         const values = Array.isArray(tag.value) ? tag.value : [tag.value];
-                        for (const value of values) {
-                            preHeaderText += `- ${value}\n`;
+                        if (values.length === 0) {
+                            // If array is empty, just add the key
+                            preHeaderText += `${tag.name}:\n`;
+                        } else {
+                            // Add each value as a list item
+                            for (const value of values) {
+                                if (value.trim() === '') {
+                                    preHeaderText += `-\n`;  // Empty item
+                                } else {
+                                    preHeaderText += `- ${value.trim()}\n`;  // Non-empty item
+                                }
+                            }
                         }
                     } else if (tag.format === 'array') {
                         const values = Array.isArray(tag.value) ? tag.value : [tag.value];
                         preHeaderText += `${tag.name}: [${values.join(', ')}]\n`;
                     } else {
-                        preHeaderText += `${tag.name}: ${tag.value}\n`;
+                        const value = Array.isArray(tag.value) ? tag.value[0] : tag.value;
+                        preHeaderText += `${tag.name}: ${value}\n`;
                     }
                 }
                 preHeaderText += '---\n';
