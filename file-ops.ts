@@ -16,15 +16,34 @@ export interface TemplateFolderStruct {
     IncludeSubFolders: boolean;
 }
 
-export interface HeaderSection {
-    header: string;
+// Base interface for common properties
+export interface BaseSection {
     content: string;
     position: number;
-    isPreHeaderContent?: boolean;
-    level?: number;  // 1 for L1, 2 for L2, undefined for pre-header
-    subSections?: HeaderSection[];  // For L2 headers under this L1
-    preHeaderContent?: PreHeaderContent;  // Structured pre-header content
 }
+
+// Interface for pre-header sections
+export interface PreHeaderSection extends BaseSection {
+    type: 'pre-header';
+    header: '';
+    preHeaderContent: PreHeaderContent;
+}
+
+// Interface for L1 header sections
+export interface L1HeaderSection extends BaseSection {
+    type: 'l1';
+    header: string;
+    subSections: L2HeaderSection[];
+}
+
+// Interface for L2 header sections
+export interface L2HeaderSection extends BaseSection {
+    type: 'l2';
+    header: string;
+}
+
+// Union type for all section types
+export type ContentSection = PreHeaderSection | L1HeaderSection | L2HeaderSection;
 
 /**
  * Merges pre-header content from template and target files
@@ -193,20 +212,22 @@ export function getFilesInFolder(app: App, folderPath: string, includeSubFolders
     return files;
 }
 
-export function getLevel1Headers(app: App, templatePath: string): string[] {
-    const headers: string[] = [];
+export async function getLevel1Headers(app: App, templatePath: string): Promise<string[]> {
     const file = app.vault.getAbstractFileByPath(templatePath);
-
     if (!(file instanceof TFile)) {
-        console.error(`Template file not found: ${templatePath}`);
-        return headers;
+        return [];
     }
+
+    const sections = await getHeaderSections(app, templatePath);
+    const headers = sections
+        .filter(s => s.type === 'l1')
+        .map(s => s.header);
 
     return headers;
 }
 
-function findDuplicateHeaders(sections: HeaderSection[]): { [key: string]: HeaderSection[] } {
-    const headerMap: { [key: string]: HeaderSection[] } = {};
+function findDuplicateHeaders(sections: ContentSection[]): { [key: string]: ContentSection[] } {
+    const headerMap: { [key: string]: ContentSection[] } = {};
 
     sections.forEach(section => {
         if (!headerMap[section.header]) {
@@ -220,18 +241,18 @@ function findDuplicateHeaders(sections: HeaderSection[]): { [key: string]: Heade
     );
 }
 
-function combineHeaderSections(sections: HeaderSection[]): HeaderSection {
+function combineHeaderSections(sections: L1HeaderSection[]): L1HeaderSection {
     const combinedContent = sections.map(s => s.content).join('\n\n');
     return {
+        type: 'l1',
         header: sections[0].header,
         content: combinedContent,
         position: sections[0].position,
-        level: sections[0].level,
         subSections: sections[0].subSections
     };
 }
 
-export async function getHeaderSections(app: App, filePath: string): Promise<HeaderSection[]> {
+export async function getHeaderSections(app: App, filePath: string): Promise<ContentSection[]> {
     debug(`Reading sections from: ${filePath}`);
     const file = app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) {
@@ -242,7 +263,7 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
     const content = await app.vault.read(file);
     debug(`File content:\n${content}`);
     const lines = content.split('\n');
-    const sections: HeaderSection[] = [];
+    const sections: ContentSection[] = [];
 
     // Check for content before first header
     const preHeaderLines = [];
@@ -262,10 +283,10 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
             const parsedPreHeader = parsePreHeaderContent(preHeaderContent);
             debug(`Parsed pre-header:`, parsedPreHeader);
             sections.push({
+                type: 'pre-header',
                 header: '',
                 content: preHeaderContent,
                 position: 0,
-                isPreHeaderContent: true,
                 preHeaderContent: parsedPreHeader
             });
         }
@@ -275,16 +296,16 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
     let currentL1Content: string[] = [];
     let currentL2Header = '';
     let currentL2Content: string[] = [];
-    let currentL1Section: HeaderSection | null = null;
+    let currentL1Section: L1HeaderSection | null = null;
 
     const saveL2Section = () => {
         if (currentL2Header && currentL1Section?.subSections) {
             // Save L2 content if there is any
             currentL1Section.subSections.push({
+                type: 'l2',
                 header: currentL2Header,
                 content: currentL2Content.filter(l => l.trim() !== '').join('\n').trim(),
-                position: currentL1Section.subSections.length,
-                level: 2
+                position: currentL1Section.subSections.length
             });
             
             // Reset L2-related variables
@@ -324,10 +345,10 @@ export async function getHeaderSections(app: App, filePath: string): Promise<Hea
             currentL1Header = line.substring(2).trim();
             saveL2Section();  // Save any pending L2 section
             currentL1Section = {
+                type: 'l1',
                 header: currentL1Header,
                 content: '',
                 position: sections.length,
-                level: 1,
                 subSections: []  // Always initialize subSections array
             };
         } else if (line.startsWith('## ')) {  // L2 header
@@ -364,11 +385,11 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
         const templateSections = await getHeaderSections(app, templatePath);
         debug(`\tReading target file...`);
         let targetSections = await getHeaderSections(app, targetPath);
-        const stagingSections: HeaderSection[] = [];
+        const stagingSections: ContentSection[] = [];
 
         // Handle pre-header content first
-        const templatePreHeader = templateSections.find(s => s.isPreHeaderContent)?.preHeaderContent;
-        const targetPreHeader = targetSections.find(s => s.isPreHeaderContent)?.preHeaderContent;
+        const templatePreHeader = templateSections.find(s => s.type === 'pre-header')?.preHeaderContent;
+        const targetPreHeader = targetSections.find(s => s.type === 'pre-header')?.preHeaderContent;
 
         if (templatePreHeader || targetPreHeader) {
             debug(`\t\tMerging pre-header content`);
@@ -420,24 +441,24 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
             }
 
             stagingSections.push({
+                type: 'pre-header',
                 header: '',
                 content: preHeaderText.trim(),
                 position: 0,
-                isPreHeaderContent: true,
                 preHeaderContent: mergedPreHeader
             });
         }
 
         // Remove pre-header sections from both arrays
-        let templateInMemory = templateSections.filter(s => !s.isPreHeaderContent);
-        targetSections = targetSections.filter(s => !s.isPreHeaderContent);
+        let templateInMemory = templateSections.filter(s => s.type !== 'pre-header');
+        targetSections = targetSections.filter(s => s.type !== 'pre-header');
 
         // Process L1 headers from template in order
         debug(`\tProcessing template headers in order...`);
-        for (const templateL1Section of templateInMemory) {
+        for (const templateL1Section of templateInMemory as L1HeaderSection[]) {
             debug(`\t\tProcessing L1 header: "${templateL1Section.header}"`);
             // Find ALL matching L1 headers in target
-            const matchingL1Sections = targetSections.filter(s => s.header === templateL1Section.header);
+            const matchingL1Sections = targetSections.filter(s => s.type === 'l1' && s.header === templateL1Section.header) as L1HeaderSection[];
             
             if (matchingL1Sections.length > 0) {
                 debug(`\t\t\tFound ${matchingL1Sections.length} matching L1 section(s) in target`);
@@ -451,11 +472,11 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                 const finalContent = combinedL1Content || templateL1Section.content.trim();
 
                 // Initialize stagingL1Section with subSections array
-                const stagingL1Section: HeaderSection = {
+                const stagingL1Section: L1HeaderSection = {
+                    type: 'l1',
                     header: templateL1Section.header,
                     content: finalContent,
                     position: stagingSections.length,
-                    level: 1,
                     subSections: []
                 };
 
@@ -476,9 +497,9 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                         // Find matching L2 header in target
                         const matchingL2Sections = matchingL1Sections
                             .filter(s => s.subSections)
-                            .flatMap(s => s.subSections || [])
+                            .flatMap(s => s.subSections)
                             .filter(s => s.header === templateL2Section.header);
-                        
+
                         if (matchingL2Sections.length > 0) {
                             debug(`\t\t\t\t\tFound ${matchingL2Sections.length} matching L2 section(s) in target`);
                             // Combine content from all matching L2 sections in target only
@@ -495,10 +516,10 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                             }
                             
                             stagingL1Section.subSections.push({
+                                type: 'l2',
                                 header: templateL2Section.header,
                                 content: finalContent,
-                                position: stagingL1Section.subSections.length,
-                                level: 2
+                                position: stagingL1Section.subSections.length
                             });
                         } else {
                             debug(`\t\t\t\t\tNo matching L2 section found, using template content`);
@@ -508,10 +529,10 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                             }
                             
                             stagingL1Section.subSections.push({
+                                type: 'l2',
                                 header: templateL2Section.header,
                                 content: templateL2Section.content.trim(),
-                                position: stagingL1Section.subSections.length,
-                                level: 2
+                                position: stagingL1Section.subSections.length
                             });
                         }
                     }
@@ -534,10 +555,10 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                                 }
                                 
                                 stagingL1Section.subSections.push({
+                                    type: 'l2',
                                     header: l2Section.header,
                                     content: l2Section.content.trim(),
-                                    position: stagingL1Section.subSections.length,
-                                    level: 2
+                                    position: stagingL1Section.subSections.length
                                 });
                             }
                         }
@@ -552,11 +573,11 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
             } else {
                 debug(`\t\t\tNo matching L1 section found, using template content`);
                 // Use content from template's L1
-                const stagingL1Section: HeaderSection = {
+                const stagingL1Section: L1HeaderSection = {
+                    type: 'l1',
                     header: templateL1Section.header,
                     content: templateL1Section.content.trim(),
                     position: stagingSections.length,
-                    level: 1,
                     subSections: []
                 };
 
@@ -568,10 +589,10 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                         }
                         
                         stagingL1Section.subSections.push({
+                            type: 'l2',
                             header: s.header,
                             content: s.content.trim(),
-                            position: stagingL1Section.subSections.length,
-                            level: 2
+                            position: stagingL1Section.subSections.length
                         });
                     });
                 }
@@ -586,26 +607,22 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
             targetSections.forEach(section => {
                 debug(`\t\tAdding remaining L1 header: "${section.header}"`);
                 // Initialize stagingL1Section with subSections array
-                const stagingL1Section: HeaderSection = {
+                const stagingL1Section: L1HeaderSection = {
+                    type: 'l1',
                     header: section.header,
                     content: section.content.trim(),
                     position: stagingSections.length,
-                    level: 1,
                     subSections: []
                 };
 
                 // Add any L2 headers from the target section
-                if (section.subSections && section.subSections.length > 0) {
+                if (section.type === 'l1') {
                     section.subSections.forEach(l2 => {
-                        if (!stagingL1Section.subSections) {
-                            stagingL1Section.subSections = [];
-                        }
-                        
                         stagingL1Section.subSections.push({
+                            type: 'l2',
                             header: l2.header,
                             content: l2.content.trim(),
-                            position: stagingL1Section.subSections.length,
-                            level: 2
+                            position: stagingL1Section.subSections.length
                         });
                     });
                 }
@@ -618,7 +635,7 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
         debug(`\tGenerating final content...`);
         const finalContent = stagingSections
             .map(section => {
-                if (section.isPreHeaderContent) {
+                if (section.type === 'pre-header') {
                     return section.content.trim();
                 }
                 
@@ -633,7 +650,7 @@ export async function updateFileWithTemplate(app: App, templatePath: string, tar
                 }
                 
                 // Add L2 sections if they exist
-                if (section.subSections && section.subSections.length > 0) {
+                if (section.type === 'l1' && section.subSections) {
                     for (const l2Section of section.subSections) {
                         parts.push(`\n## ${l2Section.header}`);
                         if (l2Section.content && l2Section.content.trim()) {
@@ -687,7 +704,7 @@ export async function RunUpdate(app: App, template: string, folder: string, incl
     debug(`\n\t\tFound ${files.length} files to process:`, files.map(file => file.path));
 
     // Get level 1 headers from the template file
-    const templateHeaders = getLevel1Headers(app, template);
+    const templateHeaders = await getLevel1Headers(app, template);
 
     // Process each file
     for (const file of files) {
