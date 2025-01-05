@@ -1,6 +1,6 @@
 import { TAbstractFile, TFolder, TFile, App, Notice } from 'obsidian';
 import { TextInputSuggest } from 'suggest';
-import { parsePreHeaderContent, PreHeaderContent, FrontmatterTag, InlineProperty } from './pre-header-parser';
+import { parsePreHeaderContent, PreHeaderContent, FrontmatterTag, InlineProperty } from './sections-functions';
 
 let DEBUG = false;
 

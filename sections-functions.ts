@@ -25,7 +25,7 @@ function debug(...args: any[]) {
  * @param content - The content string between --- markers
  * @returns Array of FrontmatterTag objects
  */
-function parseFrontmatter(content: string): FrontmatterTag[] {
+export function parseFrontmatter(content: string): FrontmatterTag[] {
     debug('Parsing frontmatter:', content);
     const tags: FrontmatterTag[] = [];
     const lines = content.split('\n');
@@ -103,12 +103,12 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
             tag.value = [];
             currentArrayTag = tag;
             tags.push(tag);
-            continue;
+        } else {
+            // Handle single value
+            tag.value = value;
+            tag.format = 'single';
+            tags.push(tag);
         }
-
-        // Handle single value
-        tag.value = [value];
-        tags.push(tag);
     }
 
     return tags;
@@ -119,26 +119,28 @@ function parseFrontmatter(content: string): FrontmatterTag[] {
  * @param content - The content string
  * @returns Array of InlineProperty objects and remaining text
  */
-function parseInlineProperties(content: string): { properties: InlineProperty[], remainingText: string } {
+export function parseInlineProperties(content: string): { properties: InlineProperty[], remainingText: string } {
     const properties: InlineProperty[] = [];
-    const lines = content.split('\n');
-    const remainingLines: string[] = [];
+    let remainingText = content;
 
-    for (const line of lines) {
-        const match = line.match(/^([^:]+)::(.*)$/);
-        if (match) {
-            properties.push({
-                name: match[1].trim(),
-                value: match[2].trim()
-            });
-        } else if (line.trim()) {
-            remainingLines.push(line);
-        }
+    // Match inline properties in the format [key:: value]
+    const regex = /\[([^\]]+?)::([^\]]*?)\]/g;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+        const [fullMatch, name, value] = match;
+        properties.push({
+            name: name.trim(),
+            value: value.trim()
+        });
+
+        // Remove the matched property from remainingText
+        remainingText = remainingText.replace(fullMatch, '');
     }
 
     return {
         properties,
-        remainingText: remainingLines.join('\n')
+        remainingText: remainingText.trim()
     };
 }
 
@@ -148,33 +150,33 @@ function parseInlineProperties(content: string): { properties: InlineProperty[],
  * @returns PreHeaderContent object
  */
 export function parsePreHeaderContent(content: string): PreHeaderContent {
+    debug('Parsing pre-header content:', content);
     const result: PreHeaderContent = {
         frontmatter: [],
         inlineProperties: [],
         remainingText: ''
     };
 
-    if (!content.trim()) {
-        return result;
-    }
-
-    // Split content into frontmatter and rest
-    const parts = content.split('---').map(part => part.trim());
+    // Split content into frontmatter and remaining text
+    const parts = content.split(/^---$/m);
     
     if (parts.length >= 3) {
         // Has frontmatter
-        result.frontmatter = parseFrontmatter(parts[1]);
-        const restContent = parts.slice(2).join('---').trim();
-        const inlineResult = parseInlineProperties(restContent);
-        result.inlineProperties = inlineResult.properties;
-        result.remainingText = inlineResult.remainingText;
+        const frontmatterContent = parts[1].trim();
+        result.frontmatter = parseFrontmatter(frontmatterContent);
+        
+        // Join remaining parts and parse inline properties
+        const remainingContent = parts.slice(2).join('---').trim();
+        const { properties, remainingText } = parseInlineProperties(remainingContent);
+        result.inlineProperties = properties;
+        result.remainingText = remainingText;
     } else {
-        // No frontmatter, just inline properties and text
-        const inlineResult = parseInlineProperties(content);
-        result.inlineProperties = inlineResult.properties;
-        result.remainingText = inlineResult.remainingText;
+        // No frontmatter, just parse inline properties
+        const { properties, remainingText } = parseInlineProperties(content);
+        result.inlineProperties = properties;
+        result.remainingText = remainingText;
     }
 
-    debug('Parsed content:', { content, result });
+    debug('Parsed result:', result);
     return result;
 }
