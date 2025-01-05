@@ -94,12 +94,63 @@ This file contains development notes and is kept locally but not pushed to GitHu
 
 [Waiting for next development task...]
 
+# 3. Implementation Notes
 
-# 3. Internal Development Notes
+## 3.1. File Update Process
 
-## 3.1. Current Implementation Overview
+### 3.1.1. Process Flow
 
-### 3.1.1 Main Method Flow
+1. **File Loading and Parsing**
+   - `getHeaderSections(app, filePath)` is called for both template and target files
+   - Files are read line by line to identify sections
+   - Pre-header content, L1 headers, and L2 headers are parsed into `HeaderSection` objects
+   - Each `HeaderSection` contains:
+     - header: The section header text
+     - content: The section content
+     - position: Original position in file
+     - level: 1 for L1 headers, 2 for L2 headers, undefined for pre-header
+     - subSections: Array of L2 HeaderSections (for L1 headers)
+     - preHeaderContent: Structured pre-header content (for pre-header only)
+
+2. **Pre-Header Processing**
+   - Pre-header sections are identified by content before first L1 header
+   - `parsePreHeaderContent()` extracts:
+     - Frontmatter tags (between --- markers)
+     - Inline properties (using :: syntax)
+     - Remaining text
+   - `mergePreHeaderContent()` combines template and target pre-headers:
+     - Target tags override template tags with same name
+     - All unique tags are preserved
+     - Tag ordering follows template where possible
+     - Empty tags and arrays are preserved
+
+3. **L1 Header Processing**
+   - Template L1 headers are processed in order
+   - For each template L1 header:
+     - Find all matching L1 sections in target
+     - Combine content from all matching target sections
+     - If no target content exists, use template content
+     - Process L2 headers within the L1 context
+
+4. **L2 Header Processing**
+   - L2 headers are processed within their parent L1 context
+   - For each template L2 header:
+     - Find matching L2 headers in target under same L1
+     - Use target content if exists, else template content
+   - Additional target L2 headers are preserved
+   - L2 header order follows template where possible
+
+5. **Content Assembly**
+   - Final document is assembled in order:
+     1. Pre-header content (if exists)
+     2. Template L1 headers with merged content
+     3. Additional target L1 headers
+   - Within each L1 section:
+     1. L1 content
+     2. Template L2 headers with merged content
+     3. Additional target L2 headers
+
+### 3.1.2 Main Method Flow
 
 ```typescript
 function updateFileWithTemplate(app, templatePath, targetPath):
@@ -216,7 +267,6 @@ function updateFileWithTemplate(app, templatePath, targetPath):
     
     // I. FINAL ASSEMBLY
     return convertToMarkdown(stagingInMemory)
-```
 
 ### 4.1.2 Key Data Loss Prevention Mechanisms
 
