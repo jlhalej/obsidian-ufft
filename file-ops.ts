@@ -1,12 +1,24 @@
 import { TAbstractFile, TFolder, TFile, App, Notice } from 'obsidian';
 import { TextInputSuggest } from 'suggest';
-import { parsePreHeaderContent, PreHeaderContent, FrontmatterTag, InlineProperty } from './sections-functions';
+import { 
+    parsePreHeaderContent, 
+    PreHeaderContent, 
+    FrontmatterTag, 
+    InlineProperty,
+    ContentSection,
+    L1HeaderSection,
+    L2HeaderSection,
+    PreHeaderSection,
+    findDuplicateHeaders,
+    combineHeaderSections,
+    getHeaderSections,
+    mergePreHeaderContent
+} from './sections-functions';
 
 let DEBUG = false;
 
-// Helper function to log debug messages
 function debug(...args: any[]) {
-    console.log(...args);
+    console.log('[File Operations]', ...args);
 }
 
 // Add the interfaces needed for the settings
@@ -14,123 +26,6 @@ export interface TemplateFolderStruct {
     Template: string;
     Folder: string;
     IncludeSubFolders: boolean;
-}
-
-// Base interface for common properties
-export interface BaseSection {
-    content: string;
-    position: number;
-}
-
-// Interface for pre-header sections
-export interface PreHeaderSection extends BaseSection {
-    type: 'pre-header';
-    header: '';
-    preHeaderContent: PreHeaderContent;
-}
-
-// Interface for L1 header sections
-export interface L1HeaderSection extends BaseSection {
-    type: 'l1';
-    header: string;
-    subSections: L2HeaderSection[];
-}
-
-// Interface for L2 header sections
-export interface L2HeaderSection extends BaseSection {
-    type: 'l2';
-    header: string;
-}
-
-// Union type for all section types
-export type ContentSection = PreHeaderSection | L1HeaderSection | L2HeaderSection;
-
-/**
- * Merges pre-header content from template and target files
- * @param templatePreHeader Template pre-header content
- * @param targetPreHeader Target pre-header content
- * @returns Merged pre-header content
- */
-function mergePreHeaderContent(templatePreHeader: PreHeaderContent | undefined, targetPreHeader: PreHeaderContent | undefined): PreHeaderContent {
-    const result: PreHeaderContent = {
-        frontmatter: [],
-        inlineProperties: [],
-        remainingText: ''
-    };
-
-    // If no template pre-header, use target if it exists
-    if (!templatePreHeader) {
-        return targetPreHeader || result;
-    }
-
-    // If no target pre-header, use template
-    if (!targetPreHeader) {
-        return templatePreHeader;
-    }
-
-    // Create a map of all tags from both sources
-    const allTags = new Map<string, FrontmatterTag>();
-
-    // First add template tags
-    templatePreHeader.frontmatter.forEach(tag => {
-        allTags.set(tag.name, { ...tag });
-    });
-
-    // Then add/override with target tags
-    targetPreHeader.frontmatter.forEach(tag => {
-        if (!allTags.has(tag.name)) {
-            // If tag doesn't exist in template, add it
-            allTags.set(tag.name, { ...tag });
-        } else {
-            // If tag exists in template, use target's value and format
-            const existingTag = allTags.get(tag.name)!;
-            existingTag.value = tag.value;
-            existingTag.format = tag.format;
-        }
-    });
-
-    // Convert map back to array while preserving order
-    const templateOrder = new Set(templatePreHeader.frontmatter.map(t => t.name));
-    const targetOrder = new Set(targetPreHeader.frontmatter.map(t => t.name));
-    
-    // Add template tags first
-    templateOrder.forEach(name => {
-        const tag = allTags.get(name);
-        if (tag) {
-            result.frontmatter.push(tag);
-            allTags.delete(name);
-        }
-    });
-
-    // Then add remaining target tags
-    targetOrder.forEach(name => {
-        const tag = allTags.get(name);
-        if (tag) {
-            result.frontmatter.push(tag);
-            allTags.delete(name);
-        }
-    });
-
-    // Process inline properties similarly
-    const allProps = new Map<string, InlineProperty>();
-
-    // First add template properties
-    templatePreHeader.inlineProperties.forEach(prop => {
-        allProps.set(prop.name, { ...prop });
-    });
-
-    // Then add/override with target properties
-    targetPreHeader.inlineProperties.forEach(prop => {
-        allProps.set(prop.name, { ...prop });
-    });
-
-    // Convert map back to array while preserving order
-    result.inlineProperties = Array.from(allProps.values());
-
-    // Use target's remaining text if it exists, otherwise use template's
-    result.remainingText = targetPreHeader.remainingText.trim() || templatePreHeader.remainingText.trim();
-
-    return result;
 }
 
 export class FolderSuggest extends TextInputSuggest<TFolder> {
@@ -210,168 +105,6 @@ export function getFilesInFolder(app: App, folderPath: string, includeSubFolders
 
     processFolder(folder);
     return files;
-}
-
-export async function getLevel1Headers(app: App, templatePath: string): Promise<string[]> {
-    const file = app.vault.getAbstractFileByPath(templatePath);
-    if (!(file instanceof TFile)) {
-        return [];
-    }
-
-    const sections = await getHeaderSections(app, templatePath);
-    const headers = sections
-        .filter(s => s.type === 'l1')
-        .map(s => s.header);
-
-    return headers;
-}
-
-function findDuplicateHeaders(sections: ContentSection[]): { [key: string]: ContentSection[] } {
-    const headerMap: { [key: string]: ContentSection[] } = {};
-
-    sections.forEach(section => {
-        if (!headerMap[section.header]) {
-            headerMap[section.header] = [];
-        }
-        headerMap[section.header].push(section);
-    });
-
-    return Object.fromEntries(
-        Object.entries(headerMap).filter(([_, sections]) => sections.length > 1)
-    );
-}
-
-function combineHeaderSections(sections: L1HeaderSection[]): L1HeaderSection {
-    const combinedContent = sections.map(s => s.content).join('\n\n');
-    return {
-        type: 'l1',
-        header: sections[0].header,
-        content: combinedContent,
-        position: sections[0].position,
-        subSections: sections[0].subSections
-    };
-}
-
-export async function getHeaderSections(app: App, filePath: string): Promise<ContentSection[]> {
-    debug(`Reading sections from: ${filePath}`);
-    const file = app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof TFile)) {
-        debug(`File not found: ${filePath}`);
-        return [];
-    }
-
-    const content = await app.vault.read(file);
-    debug(`File content:\n${content}`);
-    const lines = content.split('\n');
-    const sections: ContentSection[] = [];
-
-    // Check for content before first header
-    const preHeaderLines = [];
-    let i = 0;
-    while (i < lines.length && !lines[i].startsWith('# ')) {
-        if (lines[i].trim() !== '') {
-            preHeaderLines.push(lines[i]);
-        }
-        i++;
-    }
-
-    if (preHeaderLines.length > 0) {
-        debug(`Found pre-header content: ${preHeaderLines.length} lines`);
-        const preHeaderContent = preHeaderLines.join('\n').trim();
-        if (preHeaderContent) {
-            debug(`Pre-header content:\n${preHeaderContent}`);
-            const parsedPreHeader = parsePreHeaderContent(preHeaderContent);
-            debug(`Parsed pre-header:`, parsedPreHeader);
-            sections.push({
-                type: 'pre-header',
-                header: '',
-                content: preHeaderContent,
-                position: 0,
-                preHeaderContent: parsedPreHeader
-            });
-        }
-    }
-
-    let currentL1Header = '';
-    let currentL1Content: string[] = [];
-    let currentL2Header = '';
-    let currentL2Content: string[] = [];
-    let currentL1Section: L1HeaderSection | null = null;
-
-    const saveL2Section = () => {
-        if (currentL2Header && currentL1Section?.subSections) {
-            // Save L2 content if there is any
-            currentL1Section.subSections.push({
-                type: 'l2',
-                header: currentL2Header,
-                content: currentL2Content.filter(l => l.trim() !== '').join('\n').trim(),
-                position: currentL1Section.subSections.length
-            });
-            
-            // Reset L2-related variables
-            currentL2Header = '';
-            currentL2Content = [];
-        }
-    };
-
-    const saveL1Section = () => {
-        // Save any pending L2 section first
-        saveL2Section();
-        
-        // If we have a current L1 section and content
-        if (currentL1Section && currentL1Content.length > 0) {
-            currentL1Section.content = currentL1Content.filter(l => l.trim() !== '').join('\n').trim();
-        }
-        
-        // Push current L1 section if it exists
-        if (currentL1Section) {
-            sections.push(currentL1Section);
-        }
-        
-        // Reset all L1-related variables
-        currentL1Header = '';
-        currentL1Content = [];
-        currentL1Section = null;
-    };
-
-    for (; i < lines.length; i++) {
-        const line = lines[i];
-
-        if (line.startsWith('# ')) {  // L1 header
-            // Save previous sections
-            saveL1Section();
-
-            // Start new L1 section
-            currentL1Header = line.substring(2).trim();
-            saveL2Section();  // Save any pending L2 section
-            currentL1Section = {
-                type: 'l1',
-                header: currentL1Header,
-                content: '',
-                position: sections.length,
-                subSections: []  // Always initialize subSections array
-            };
-        } else if (line.startsWith('## ')) {  // L2 header
-            // Save any previous L2 section
-            saveL2Section();
-
-            // Start new L2 section
-            currentL2Header = line.substring(3).trim();
-        } else {
-            // Add content to appropriate section
-            if (currentL2Header) {
-                currentL2Content.push(line);
-            } else if (currentL1Section) {  
-                currentL1Content.push(line);
-            }
-        }
-    }
-
-    // Save final sections
-    saveL1Section();
-
-    debug(`Parsed sections:`, sections);
-    return sections;
 }
 
 export async function updateFileWithTemplate(app: App, templatePath: string, targetPath: string): Promise<void> {
@@ -702,9 +435,6 @@ export async function RunUpdate(app: App, template: string, folder: string, incl
     }
 
     debug(`\n\t\tFound ${files.length} files to process:`, files.map(file => file.path));
-
-    // Get level 1 headers from the template file
-    const templateHeaders = await getLevel1Headers(app, template);
 
     // Process each file
     for (const file of files) {
