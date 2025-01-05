@@ -1,4 +1,35 @@
 // Interfaces for Pre-Header Content parsing
+import { App, TFile } from 'obsidian';
+
+// Base interface for common properties
+export interface BaseSection {
+    content: string;
+    position: number;
+}
+
+// Interface for pre-header sections
+export interface PreHeaderSection extends BaseSection {
+    type: 'pre-header';
+    header: '';
+    preHeaderContent: PreHeaderContent;
+}
+
+// Interface for L1 header sections
+export interface L1HeaderSection extends BaseSection {
+    type: 'l1';
+    header: string;
+    subSections: L2HeaderSection[];
+}
+
+// Interface for L2 header sections
+export interface L2HeaderSection extends BaseSection {
+    type: 'l2';
+    header: string;
+}
+
+// Union type for all section types
+export type ContentSection = PreHeaderSection | L1HeaderSection | L2HeaderSection;
+
 export interface FrontmatterTag {
     name: string;
     value: string | string[];
@@ -17,7 +48,7 @@ export interface PreHeaderContent {
 }
 
 function debug(...args: any[]) {
-    console.log('[Pre-Header Parser]', ...args);
+    console.log('[UFFT]', ...args);
 }
 
 /**
@@ -178,5 +209,245 @@ export function parsePreHeaderContent(content: string): PreHeaderContent {
     }
 
     debug('Parsed result:', result);
+    return result;
+}
+
+/**
+ * Finds duplicate headers in a list of sections
+ * @param sections List of sections to check
+ * @returns Map of header to array of sections with that header
+ */
+export function findDuplicateHeaders(sections: ContentSection[]): { [key: string]: ContentSection[] } {
+    const headerMap: { [key: string]: ContentSection[] } = {};
+    
+    sections.forEach(section => {
+        if (section.type === 'l1' || section.type === 'l2') {
+            if (!headerMap[section.header]) {
+                headerMap[section.header] = [];
+            }
+            headerMap[section.header].push(section);
+        }
+    });
+
+    // Filter out headers that don't have duplicates
+    return Object.fromEntries(
+        Object.entries(headerMap).filter(([_, sections]) => sections.length > 1)
+    );
+}
+
+/**
+ * Combines multiple sections with the same header into one
+ * @param sections List of sections to combine
+ * @returns Combined section
+ */
+export function combineHeaderSections(sections: L1HeaderSection[]): L1HeaderSection {
+    const combinedContent = sections.map(s => s.content).join('\n\n');
+    return {
+        type: 'l1',
+        header: sections[0].header,
+        content: combinedContent,
+        position: sections[0].position,
+        subSections: sections[0].subSections
+    };
+}
+
+/**
+ * Gets all sections from a file
+ * @param app Obsidian app instance
+ * @param filePath Path to file
+ * @returns List of sections
+ */
+export async function getHeaderSections(app: App, filePath: string): Promise<ContentSection[]> {
+    const file = app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) {
+        return [];
+    }
+
+    const content = await app.vault.read(file);
+    const sections: ContentSection[] = [];
+    let currentContent = '';
+    let currentHeader = '';
+    let currentLevel = 0;
+    let currentL1Section: L1HeaderSection | null = null;
+    let position = 0;
+
+    // First, handle pre-header content (content before first header)
+    const lines = content.split('\n');
+    let preHeaderContent = '';
+    let i = 0;
+
+    // Collect all content until first header
+    while (i < lines.length && !lines[i].match(/^#+\s/)) {
+        preHeaderContent += lines[i] + '\n';
+        i++;
+    }
+
+    // If there was pre-header content, create a pre-header section
+    if (preHeaderContent.trim()) {
+        const parsedPreHeader = parsePreHeaderContent(preHeaderContent.trim());
+        sections.push({
+            type: 'pre-header' as const,
+            header: '',
+            content: preHeaderContent.trim(),
+            position: position++,
+            preHeaderContent: parsedPreHeader
+        });
+    }
+
+    // Process remaining lines
+    for (; i < lines.length; i++) {
+        const line = lines[i];
+        const headerMatch = line.match(/^#+\s/);
+        
+        if (headerMatch) {  // Check if we found a header
+            // Count number of # to determine header level
+            const levelMatch = line.match(/^#+/);
+            const level = levelMatch ? levelMatch[0].length : 0;
+            const header = line.replace(/^#+\s*/, '').trim();
+
+            // If we have accumulated content, save it to the current section
+            if (currentHeader) {
+                const trimmedContent = currentContent.trim();
+                if (currentLevel === 1) {
+                    if (currentL1Section) {
+                        currentL1Section.content = trimmedContent;
+                        sections.push(currentL1Section);
+                    }
+                } else if (currentLevel === 2 && currentL1Section) {
+                    currentL1Section.subSections.push({
+                        type: 'l2',
+                        header: currentHeader,
+                        content: trimmedContent,
+                        position: currentL1Section.subSections.length
+                    });
+                }
+            }
+
+            // Reset for new section
+            currentContent = '';
+            currentHeader = header;
+            currentLevel = level;
+
+            // Create new L1 section if needed
+            if (level === 1) {
+                currentL1Section = {
+                    type: 'l1',
+                    header,
+                    content: '',
+                    position: position++,
+                    subSections: []
+                };
+            }
+        } else {
+            currentContent += line + '\n';
+        }
+    }
+
+    // Handle last section
+    if (currentHeader) {
+        const trimmedContent = currentContent.trim();
+        if (currentLevel === 1) {
+            if (currentL1Section) {
+                currentL1Section.content = trimmedContent;
+                sections.push(currentL1Section);
+            }
+        } else if (currentLevel === 2 && currentL1Section) {
+            currentL1Section.subSections.push({
+                type: 'l2',
+                header: currentHeader,
+                content: trimmedContent,
+                position: currentL1Section.subSections.length
+            });
+        }
+    }
+
+    return sections;
+}
+
+/**
+ * Merges pre-header content from template and target files
+ * @param templatePreHeader Template pre-header content
+ * @param targetPreHeader Target pre-header content
+ * @returns Merged pre-header content
+ */
+export function mergePreHeaderContent(templatePreHeader: PreHeaderContent | undefined, targetPreHeader: PreHeaderContent | undefined): PreHeaderContent {
+    const result: PreHeaderContent = {
+        frontmatter: [],
+        inlineProperties: [],
+        remainingText: ''
+    };
+
+    // If no template pre-header, use target if it exists
+    if (!templatePreHeader) {
+        return targetPreHeader || result;
+    }
+
+    // If no target pre-header, use template
+    if (!targetPreHeader) {
+        return templatePreHeader;
+    }
+
+    // Create a map of all tags from both sources
+    const allTags = new Map<string, FrontmatterTag>();
+
+    // First add template tags
+    templatePreHeader.frontmatter.forEach(tag => {
+        allTags.set(tag.name, { ...tag });
+    });
+
+    // Then add/override with target tags
+    targetPreHeader.frontmatter.forEach(tag => {
+        if (!allTags.has(tag.name)) {
+            // If tag doesn't exist in template, add it
+            allTags.set(tag.name, { ...tag });
+        } else {
+            // If tag exists in template, use target's value and format
+            const existingTag = allTags.get(tag.name)!;
+            existingTag.value = tag.value;
+            existingTag.format = tag.format;
+        }
+    });
+
+    // Convert map back to array while preserving order
+    const templateOrder = new Set(templatePreHeader.frontmatter.map(t => t.name));
+    const targetOrder = new Set(targetPreHeader.frontmatter.map(t => t.name));
+    
+    // Add template tags first
+    templateOrder.forEach(name => {
+        const tag = allTags.get(name);
+        if (tag) {
+            result.frontmatter.push(tag);
+            allTags.delete(name);
+        }
+    });
+
+    // Then add remaining target tags
+    targetOrder.forEach(name => {
+        const tag = allTags.get(name);
+        if (tag) {
+            result.frontmatter.push(tag);
+            allTags.delete(name);
+        }
+    });
+
+    // Process inline properties similarly
+    const allProps = new Map<string, InlineProperty>();
+
+    // First add template properties
+    templatePreHeader.inlineProperties.forEach(prop => {
+        allProps.set(prop.name, { ...prop });
+    });
+
+    // Then add/override with target properties
+    targetPreHeader.inlineProperties.forEach(prop => {
+        allProps.set(prop.name, { ...prop });
+    });
+
+    // Convert map back to array while preserving order
+    result.inlineProperties = Array.from(allProps.values());
+
+    // Use target's remaining text if it exists, otherwise use template's
+    result.remainingText = targetPreHeader.remainingText.trim() || templatePreHeader.remainingText.trim();
+
     return result;
 }
